@@ -21,6 +21,8 @@ type RemoveFurnitureApiResponse =
   | { kind: 'ok'; images: Array<{ url: string }> }
   | { kind: 'error'; error: string };
 
+type ApiImageFormat = 'image/jpeg' | 'image/png';
+
 function assertNever(value: never): never {
   throw new Error(`Unhandled state: ${String(value)}`);
 }
@@ -35,6 +37,56 @@ function getErrorMessage(state: RequestState): string | null {
     default:
       return assertNever(state);
   }
+}
+
+function isDataImageUrl(value: string): boolean {
+  return value.startsWith('data:image/');
+}
+
+async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Failed to load image'));
+    image.src = dataUrl;
+  });
+}
+
+async function compressDataUrl(
+  sourceDataUrl: string,
+  maxSide: number,
+  format: ApiImageFormat,
+  quality: number,
+): Promise<string> {
+  const image = await loadImage(sourceDataUrl);
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Could not prepare image data');
+  }
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL(format, quality);
+}
+
+async function optimizePhotoForApi(imageUrl: string, maxSide: number, quality: number): Promise<string> {
+  if (!isDataImageUrl(imageUrl)) {
+    return imageUrl;
+  }
+  return await compressDataUrl(imageUrl, maxSide, 'image/jpeg', quality);
+}
+
+async function optimizeMaskForApi(maskUrl: string, maxSide: number): Promise<string> {
+  if (!isDataImageUrl(maskUrl)) {
+    return maskUrl;
+  }
+  return await compressDataUrl(maskUrl, maxSide, 'image/png', 1);
 }
 
 export default function Home() {
@@ -86,14 +138,35 @@ export default function Home() {
   useEffect(() => {
     if (!roomImage) { setRoomDepthMap(null); return; }
     let cancelled = false;
-    fetch('/api/depth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageUrl: roomImage }),
-    })
-      .then((r) => r.json())
-      .then((data) => { if (!cancelled && data.depthImageUrl) setRoomDepthMap(data.depthImageUrl); })
-      .catch(() => {}); // silent fail — depth is background enrichment
+
+    const run = async () => {
+      try {
+        const primaryImageUrl = await optimizePhotoForApi(roomImage, 1600, 0.82);
+        let response = await fetch('/api/depth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: primaryImageUrl }),
+        });
+
+        if (response.status === 413) {
+          const retryImageUrl = await optimizePhotoForApi(roomImage, 1024, 0.7);
+          response = await fetch('/api/depth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: retryImageUrl }),
+          });
+        }
+
+        const data = await response.json();
+        if (!cancelled && data.depthImageUrl) {
+          setRoomDepthMap(data.depthImageUrl);
+        }
+      } catch {
+        // silent fail — depth is background enrichment
+      }
+    };
+
+    void run();
     return () => { cancelled = true; };
   }, [roomImage]);
 
@@ -107,35 +180,57 @@ export default function Home() {
     setGlbError(null);
     setGlbGenerating(true);
 
-    fetch('/api/generate-3d', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageUrl: referenceImage, maskUrl: furnitureMask }),
-      signal: controller.signal,
-    })
-      .then(async (r) => {
-        if (!r.ok) {
-          const text = await r.text();
-          throw new Error(`Server error ${r.status}: ${text.slice(0, 200)}`);
+    const run = async () => {
+      try {
+        const primaryPayload = {
+          imageUrl: await optimizePhotoForApi(referenceImage, 1400, 0.82),
+          maskUrl: await optimizeMaskForApi(furnitureMask, 1400),
+        };
+
+        let response = await fetch('/api/generate-3d', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(primaryPayload),
+          signal: controller.signal,
+        });
+
+        if (response.status === 413) {
+          const retryPayload = {
+            imageUrl: await optimizePhotoForApi(referenceImage, 900, 0.7),
+            maskUrl: await optimizeMaskForApi(furnitureMask, 900),
+          };
+          response = await fetch('/api/generate-3d', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(retryPayload),
+            signal: controller.signal,
+          });
         }
-        return r.json();
-      })
-      .then((data) => {
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Server error ${response.status}: ${text.slice(0, 200)}`);
+        }
+
+        const data = await response.json();
         if (data.error) {
           setGlbError(data.error);
-        } else if (data.glbUrl) {
-          setGlbUrl(data.glbUrl);
-        } else {
-          setGlbError('No GLB URL returned');
+          return;
         }
-      })
-      .catch((err) => {
-        if (err.name === 'AbortError') return;
-        setGlbError(err.message ?? '3D generation failed');
-      })
-      .finally(() => {
+        if (data.glbUrl) {
+          setGlbUrl(data.glbUrl);
+          return;
+        }
+        setGlbError('No GLB URL returned');
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setGlbError(err instanceof Error ? err.message : '3D generation failed');
+      } finally {
         if (!controller.signal.aborted) setGlbGenerating(false);
-      });
+      }
+    };
+
+    void run();
 
     return () => { controller.abort(); };
   }, [referenceImage, furnitureMask]);
@@ -146,16 +241,32 @@ export default function Home() {
     setTransformState({ kind: 'loading' });
 
     try {
-      const response = await fetch('/api/transform', {
+      const primaryPayload = {
+        roomImageUrl: await optimizePhotoForApi(roomImage, 1600, 0.82),
+        referenceImageUrl: await optimizePhotoForApi(referenceImage, 1400, 0.82),
+        transformationAmount: transformStrength / 100,
+        numImages: numberOfImages,
+      };
+
+      let response = await fetch('/api/transform', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomImageUrl: roomImage,
-          referenceImageUrl: referenceImage,
-          transformationAmount: transformStrength / 100,
-          numImages: numberOfImages,
-        }),
+        body: JSON.stringify(primaryPayload),
       });
+
+      if (response.status === 413) {
+        const retryPayload = {
+          roomImageUrl: await optimizePhotoForApi(roomImage, 1100, 0.7),
+          referenceImageUrl: await optimizePhotoForApi(referenceImage, 900, 0.7),
+          transformationAmount: transformStrength / 100,
+          numImages: Math.min(numberOfImages, 2),
+        };
+        response = await fetch('/api/transform', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(retryPayload),
+        });
+      }
 
       const data = await response.json() as TransformApiResponse;
       if (data.kind === 'error') throw new Error(data.error);
@@ -178,15 +289,30 @@ export default function Home() {
     setRemoveState({ kind: 'loading' });
 
     try {
-      const response = await fetch('/api/remove-furniture', {
+      const primaryPayload = {
+        roomImageUrl: await optimizePhotoForApi(roomImage, 1600, 0.82),
+        maskUrl: await optimizeMaskForApi(removeMask, 1600),
+        numImages: numberOfImages,
+      };
+
+      let response = await fetch('/api/remove-furniture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomImageUrl: roomImage,
-          maskUrl: removeMask,
-          numImages: numberOfImages,
-        }),
+        body: JSON.stringify(primaryPayload),
       });
+
+      if (response.status === 413) {
+        const retryPayload = {
+          roomImageUrl: await optimizePhotoForApi(roomImage, 1100, 0.7),
+          maskUrl: await optimizeMaskForApi(removeMask, 1100),
+          numImages: Math.min(numberOfImages, 2),
+        };
+        response = await fetch('/api/remove-furniture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(retryPayload),
+        });
+      }
 
       const data = await response.json() as RemoveFurnitureApiResponse;
       if (data.kind === 'error') throw new Error(data.error);
