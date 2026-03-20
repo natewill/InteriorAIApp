@@ -12,6 +12,15 @@ With Transform mode, you can visualize what your room would look like with a bra
 
 With Furniture Finder mode, you can quickly identify any piece of furniture you see in a generated picture with just a few clicks.
 
+## Screenshots
+
+![InteriorAI screenshot 1](public/readme/1.jpg)
+![InteriorAI screenshot 2](public/readme/2.jpg)
+![InteriorAI screenshot 3](public/readme/3.jpg)
+![InteriorAI screenshot 4](public/readme/4.jpg)
+![InteriorAI screenshot 5](public/readme/5.jpg)
+![InteriorAI screenshot 6](public/readme/6.jpg)
+
 ## Tech Stack
 
 The app uses Next.js, TypeScript, and React for app routing and frontend work.
