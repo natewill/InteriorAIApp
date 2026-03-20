@@ -220,7 +220,6 @@ export default function AddModePanel() {
 
   // Fired on every decode — auto-saves mask without requiring Confirm button
   const handleMaskChange = async (maskUrl: string, imageUrl: string, points: SegmentPoint[], imageId: string | null) => {
-    setFurnitureMask(maskUrl);
     setSavedMask(maskUrl);
     setSavedPoints(points);
     setSavedImageId(imageId);
@@ -237,6 +236,9 @@ export default function AddModePanel() {
     setSavedPoints(points);
     setSavedMask(maskUrl);
     setSavedImageId(imageId);
+    if (maskUrl) {
+      setFurnitureMask(maskUrl);
+    }
     // If user reset/undid everything, clear the confirmed mask too
     if (!maskUrl) {
       setFurnitureMask(null);
@@ -246,9 +248,16 @@ export default function AddModePanel() {
   };
 
   // Confirm button just closes — mask is already saved via handleMaskChange
-  const handleConfirm = (_maskUrl: string | null, _imageUrl: string, points: SegmentPoint[], imageId: string | null) => {
+  const handleConfirm = (maskUrl: string | null, _imageUrl: string, points: SegmentPoint[], imageId: string | null) => {
     setSavedPoints(points);
     setSavedImageId(imageId);
+    setSavedMask(maskUrl);
+    if (maskUrl) {
+      setFurnitureMask(maskUrl);
+    } else {
+      setFurnitureMask(null);
+      setSegmentedPreview(null);
+    }
     setShowModal(false);
   };
 
