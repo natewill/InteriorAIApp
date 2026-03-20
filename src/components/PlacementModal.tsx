@@ -18,6 +18,38 @@ interface PlacementModalProps {
     onClose: () => void;
 }
 
+interface PlacementGuideStep {
+    title: string;
+    description: string;
+    selector: string;
+}
+
+type PlacementGuideState =
+    | { kind: 'closed' }
+    | { kind: 'open'; stepIndex: number };
+
+const PLACEMENT_GUIDE_STEPS: PlacementGuideStep[] = [
+    {
+        title: 'Move furniture in the scene',
+        description: 'Click and drag in the scene to place the furniture where you want it. Scroll to zoom in and get the position feeling right.',
+        selector: '[data-placement-guide="scene"]',
+    },
+    {
+        title: 'Tune the placement',
+        description: 'Use these controls to make the piece feel natural in the room. Adjust the size, move it forward or back, and rotate it until it sits right.',
+        selector: '[data-placement-guide="controls"]',
+    },
+    {
+        title: 'Generate the final image',
+        description: 'When the placement looks good, click Generate. We will blend it into the room with more realistic lighting, depth, and shadows.',
+        selector: '[data-placement-guide="generate"]',
+    },
+];
+
+function isValidImageUrl(value: string): boolean {
+    return value.startsWith('data:image/') || value.startsWith('https://');
+}
+
 export default function PlacementModal({
     roomImageUrl,
     depthImageUrl,
@@ -39,10 +71,15 @@ export default function PlacementModal({
     const [showRotateGizmo, setShowRotateGizmo] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [generateError, setGenerateError] = useState<string | null>(null);
+    const [guideState, setGuideState] = useState<PlacementGuideState>({ kind: 'closed' });
+    const [guideRect, setGuideRect] = useState<DOMRect | null>(null);
+    const [hasAutoOpenedGuide, setHasAutoOpenedGuide] = useState(false);
+    const [viewport, setViewport] = useState({ width: 1200, height: 800 });
 
     // Lock background scroll
     useEffect(() => {
         document.body.style.overflow = 'hidden';
+        setViewport({ width: window.innerWidth, height: window.innerHeight });
         return () => { document.body.style.overflow = ''; };
     }, []);
 
@@ -75,10 +112,25 @@ export default function PlacementModal({
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
         try {
-            const [compositeImageUrl, maskImageUrl] = await Promise.all([
-                scene.captureComposite(),
-                scene.captureMask(),
-            ]);
+            let compositeImageUrl = '';
+            let maskImageUrl = '';
+
+            try {
+                [compositeImageUrl, maskImageUrl] = await Promise.all([
+                    scene.captureComposite(),
+                    scene.captureMask(),
+                ]);
+            } catch (error) {
+                throw new Error(error instanceof Error ? `Could not capture scene: ${error.message}` : 'Could not capture scene');
+            }
+
+            if (!isValidImageUrl(compositeImageUrl)) {
+                throw new Error('Scene capture returned an invalid composite image');
+            }
+
+            if (!isValidImageUrl(maskImageUrl)) {
+                throw new Error('Scene capture returned an invalid mask image');
+            }
 
             const res = await fetch('/api/naturalize', {
                 method: 'POST',
@@ -93,7 +145,7 @@ export default function PlacementModal({
                 }),
             });
 
-            const data = await res.json();
+            const data = await res.json() as { error?: string; images?: Array<{ url?: string }> };
 
             if (!res.ok) {
                 throw new Error(data.error || `Server error ${res.status}`);
@@ -103,7 +155,15 @@ export default function PlacementModal({
                 throw new Error('No images were generated');
             }
 
-            onConfirm(data.images.map((img: { url: string }) => img.url));
+            const resultUrls = data.images
+                .map((image) => image.url)
+                .filter((url): url is string => typeof url === 'string' && isValidImageUrl(url));
+
+            if (resultUrls.length === 0) {
+                throw new Error('Naturalize returned invalid image URLs');
+            }
+
+            onConfirm(resultUrls);
         } catch (err) {
             console.error('Generation failed:', err);
             setGenerateError(err instanceof Error ? err.message : 'Generation failed');
@@ -113,6 +173,79 @@ export default function PlacementModal({
     }, [scene, onConfirm, furnitureType, numberOfImages, referenceImageUrl, furnitureMaskUrl]);
 
     const sceneReady = !!glbUrl && !scene.loading && !scene.error;
+
+    useEffect(() => {
+        if (!sceneReady || hasAutoOpenedGuide) {
+            return;
+        }
+        setHasAutoOpenedGuide(true);
+        setGuideState({ kind: 'open', stepIndex: 0 });
+    }, [sceneReady, hasAutoOpenedGuide]);
+
+    useEffect(() => {
+        if (guideState.kind !== 'open') {
+            setGuideRect(null);
+            return;
+        }
+
+        const step = PLACEMENT_GUIDE_STEPS[guideState.stepIndex];
+        const updateRect = () => {
+            setViewport({ width: window.innerWidth, height: window.innerHeight });
+            const target = document.querySelector(step.selector);
+            if (!(target instanceof HTMLElement)) {
+                setGuideRect(null);
+                return;
+            }
+            setGuideRect(target.getBoundingClientRect());
+        };
+
+        updateRect();
+        window.addEventListener('resize', updateRect);
+        window.addEventListener('scroll', updateRect, true);
+        return () => {
+            window.removeEventListener('resize', updateRect);
+            window.removeEventListener('scroll', updateRect, true);
+        };
+    }, [guideState]);
+
+    const openGuide = () => {
+        setGuideState({ kind: 'open', stepIndex: 0 });
+    };
+
+    const closeGuide = () => {
+        setGuideState({ kind: 'closed' });
+    };
+
+    const goBackGuide = () => {
+        if (guideState.kind !== 'open') {
+            return;
+        }
+        if (guideState.stepIndex === 0) {
+            return;
+        }
+        setGuideState({ kind: 'open', stepIndex: guideState.stepIndex - 1 });
+    };
+
+    const goNextGuide = () => {
+        if (guideState.kind !== 'open') {
+            return;
+        }
+        const isLast = guideState.stepIndex === PLACEMENT_GUIDE_STEPS.length - 1;
+        if (isLast) {
+            closeGuide();
+            return;
+        }
+        setGuideState({ kind: 'open', stepIndex: guideState.stepIndex + 1 });
+    };
+
+    const guideOpen = guideState.kind === 'open';
+    const guideStep = guideOpen ? PLACEMENT_GUIDE_STEPS[guideState.stepIndex] : null;
+    const canGoBack = guideOpen && guideState.stepIndex > 0;
+    const canGoNext = guideOpen && guideState.stepIndex < PLACEMENT_GUIDE_STEPS.length - 1;
+    const guideCardLeft = guideRect ? Math.min(Math.max(guideRect.left, 16), viewport.width - 376) : 16;
+    const guideCardTop = guideRect
+        ? Math.max(16, Math.min(guideRect.bottom + 12, viewport.height - 208))
+        : 16;
 
     return createPortal(
         <div
@@ -255,6 +388,7 @@ export default function PlacementModal({
                     {/* Three.js container — always mounted so ref is stable, hidden until ready */}
                     <div
                         ref={containerRef}
+                        data-placement-guide="scene"
                         className="relative h-full w-full"
                         style={{ visibility: sceneReady ? 'visible' : 'hidden' }}
                     />
@@ -264,7 +398,7 @@ export default function PlacementModal({
                 {sceneReady && !generating && (
                     <div className="flex flex-wrap items-center justify-between gap-5 border-t border-white/20 bg-black/80 px-6 py-5 backdrop-blur-md">
                         {/* Left: sliders */}
-                        <div className="flex flex-wrap items-center gap-4">
+                        <div data-placement-guide="controls" className="flex flex-wrap items-center gap-4">
                             <label className="flex items-center gap-2 text-base text-zinc-200">
                                 Scale
                                 <input
@@ -311,6 +445,13 @@ export default function PlacementModal({
                                     Rotate furntiure
                                 </span>
                             </button>
+                            <button
+                                type="button"
+                                onClick={openGuide}
+                                className="rounded-xl border border-white/25 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/10"
+                            >
+                                Guide
+                            </button>
                         </div>
 
                         {/* Right: action buttons */}
@@ -323,6 +464,7 @@ export default function PlacementModal({
                                 Reset
                             </button>
                             <button
+                                data-placement-guide="generate"
                                 onClick={handleGenerate}
                                 disabled={generating}
                                 className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
@@ -334,6 +476,59 @@ export default function PlacementModal({
                             </button>
                         </div>
                     </div>
+                )}
+
+                {guideOpen && guideStep && (
+                    <>
+                        <div className="fixed inset-0 z-[70] bg-black/55" onClick={closeGuide} />
+                        {guideRect && (
+                            <div
+                                className="pointer-events-none fixed z-[80] rounded-xl border-2 border-blue-400 shadow-[0_0_0_2px_rgba(96,165,250,0.45)]"
+                                style={{
+                                    top: Math.max(6, guideRect.top - 6),
+                                    left: Math.max(6, guideRect.left - 6),
+                                    width: guideRect.width + 12,
+                                    height: guideRect.height + 12,
+                                }}
+                            />
+                        )}
+                        <section
+                            className="fixed z-[90] w-[360px] max-w-[calc(100vw-32px)] rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-zinc-100 shadow-2xl"
+                            style={{ top: guideCardTop, left: guideCardLeft }}
+                        >
+                            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                                3D guide · step {guideState.kind === 'open' ? guideState.stepIndex + 1 : 1}/{PLACEMENT_GUIDE_STEPS.length}
+                            </div>
+                            <h3 className="text-base font-semibold text-white">{guideStep.title}</h3>
+                            <p className="mt-1 text-sm text-zinc-300">{guideStep.description}</p>
+                            <div className="mt-4 flex items-center justify-between gap-2">
+                                <button
+                                    type="button"
+                                    onClick={goBackGuide}
+                                    disabled={!canGoBack}
+                                    className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 disabled:opacity-45"
+                                >
+                                    Back
+                                </button>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={closeGuide}
+                                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300"
+                                    >
+                                        Close
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={goNextGuide}
+                                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                                    >
+                                        {canGoNext ? 'Next' : 'Done'}
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+                    </>
                 )}
             </div>
         </div>,

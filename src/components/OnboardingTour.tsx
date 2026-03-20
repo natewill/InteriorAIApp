@@ -21,37 +21,37 @@ type TourState =
 const TOUR_STEPS: TourStep[] = [
   {
     title: 'Choose what you want to do',
-    description: 'Start by picking a mode: Add to place new furniture, Transform to restyle the room, or Remove to clear furniture out.',
+    description: 'Start here. Pick Add to place new furniture, Transform to redesign the room, or Remove to clear pieces out.',
     target: { kind: 'selector', selector: '[data-tour="mode-toggle"]' },
   },
   {
     title: 'Upload your room',
-    description: 'Drag, paste, or click to upload a photo of your room that you want to edit!',
+    description: 'Add a photo of the room you want to work on. You can drag it in, paste it, or click to upload.',
     target: { kind: 'selector', selector: '[data-tour="room-upload"]' },
   },
   {
     title: 'Upload a furniture reference',
-    description: 'Add a photo of the furniture you want to place in the room or use as the style reference.',
+    description: 'Add a furniture photo when you want the app to match a specific piece or use it as the style reference.',
     target: { kind: 'selector', selector: '[data-tour="furniture-upload"]' },
   },
   {
     title: 'Generate your result',
-    description: 'When everything looks ready, click this button to run the current mode and create new images.',
+    description: 'When everything looks right, click here to generate new images for the mode you picked.',
     target: { kind: 'selector', selector: '[data-tour="primary-action"]' },
   },
   {
     title: 'Look through your results',
-    description: 'Your generated images will show up here when the run finishes. You can flip through them and pick the one you like best.',
+    description: 'Your results will appear here. Flip through them, compare versions, and keep the one that feels best.',
     target: { kind: 'selector', selector: '[data-tour="results-view"]' },
   },
   {
     title: 'Find matching furniture',
-    description: 'Click Search Furniture in the bottom-left corner of a result image to look up similar pieces and see where they come from.',
+    description: 'Use Search Furniture on a result image to find similar real-world pieces and see where you can get them.',
     target: { kind: 'selector', selector: '[data-tour="search-furniture"]' },
   },
   {
     title: 'Come back to this anytime',
-    description: 'If you ever want a quick refresher, open this guide again from the button in the bottom-right corner.',
+    description: 'Need a refresher later? You can open this guide again anytime from the button in the bottom-right corner.',
     target: { kind: 'screen' },
   },
 ];
