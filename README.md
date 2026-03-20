@@ -2,7 +2,7 @@
 
 Welcome to InteriorAI! A new way to style your room with AI!
 
-This app is made for people who want to quickly see their room in a new, fresh style, without needing to hire an interior designer.
+This app is made for people who want to quickly see their room in a new, fresh style, without needing to hire an interior designer. [Try It!](https://interiorai-project.vercel.app)
 
 ## What It Does
 
