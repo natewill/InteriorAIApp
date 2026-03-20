@@ -370,8 +370,6 @@ export default function Home() {
           glbError={glbError}
           furnitureType={furnitureType}
           numberOfImages={numberOfImages}
-          referenceImageUrl={referenceImage}
-          furnitureMaskUrl={furnitureMask}
           onConfirm={(results) => {
             setShowPlacement(false);
             setResults(results);

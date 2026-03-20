@@ -12,8 +12,6 @@ interface PlacementModalProps {
     glbError: string | null;
     furnitureType: string;
     numberOfImages: number;
-    referenceImageUrl: string | null;
-    furnitureMaskUrl: string | null;
     onConfirm: (results: string[]) => void;
     onClose: () => void;
 }
@@ -71,6 +69,41 @@ function normalizeGenerateError(message: string): string {
     return message;
 }
 
+async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+    return await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('Failed to load captured image'));
+        image.src = dataUrl;
+    });
+}
+
+async function compressDataUrl(
+    sourceDataUrl: string,
+    maxSide: number,
+    format: 'image/jpeg' | 'image/png',
+    quality: number,
+): Promise<string> {
+    const image = await loadImage(sourceDataUrl);
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+        throw new Error('Could not prepare image data');
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL(format, quality);
+}
+
 export default function PlacementModal({
     roomImageUrl,
     depthImageUrl,
@@ -79,8 +112,6 @@ export default function PlacementModal({
     glbError,
     furnitureType,
     numberOfImages,
-    referenceImageUrl,
-    furnitureMaskUrl,
     onConfirm,
     onClose,
 }: PlacementModalProps) {
@@ -153,22 +184,45 @@ export default function PlacementModal({
                 throw new Error('Scene capture returned an invalid mask image');
             }
 
-            const res = await fetch('/api/naturalize', {
+            const naturalizePayload = {
+                compositeImageUrl: await compressDataUrl(compositeImageUrl, 1280, 'image/jpeg', 0.82),
+                maskImageUrl: await compressDataUrl(maskImageUrl, 1280, 'image/png', 1),
+                furnitureType,
+                numberOfImages,
+            };
+
+            let res = await fetch('/api/naturalize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    compositeImageUrl,
-                    maskImageUrl,
-                    furnitureType,
-                    numberOfImages,
-                    referenceImageUrl,
-                    furnitureMaskUrl,
-                }),
+                body: JSON.stringify(naturalizePayload),
             });
 
-            const data = await res.json() as { error?: string; images?: Array<{ url?: string }> };
+            if (res.status === 413) {
+                const retryPayload = {
+                    compositeImageUrl: await compressDataUrl(compositeImageUrl, 900, 'image/jpeg', 0.7),
+                    maskImageUrl: await compressDataUrl(maskImageUrl, 900, 'image/png', 1),
+                    furnitureType,
+                    numberOfImages: Math.min(numberOfImages, 2),
+                };
+
+                res = await fetch('/api/naturalize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(retryPayload),
+                });
+            }
+
+            let data: { error?: string; images?: Array<{ url?: string }> } = {};
+            try {
+                data = await res.json() as { error?: string; images?: Array<{ url?: string }> };
+            } catch {
+                data = {};
+            }
 
             if (!res.ok) {
+                if (res.status === 413) {
+                    throw new Error('Image generation failed for this scene. Please adjust placement or retry.');
+                }
                 throw new Error(normalizeGenerateError(data.error || `Server error ${res.status}`));
             }
 
@@ -192,7 +246,7 @@ export default function PlacementModal({
         } finally {
             setGenerating(false);
         }
-    }, [scene, onConfirm, furnitureType, numberOfImages, referenceImageUrl, furnitureMaskUrl]);
+    }, [scene, onConfirm, furnitureType, numberOfImages]);
 
     const sceneReady = !!glbUrl && !scene.loading && !scene.error;
 
