@@ -12,6 +12,14 @@ With Transform mode, you can visualize what your room would look like with a bra
 
 With Furniture Finder mode, you can quickly identify any piece of furniture you see in a generated picture with just a few clicks.
 
+## Tech Stack
+
+The app uses Next.js, TypeScript, and React for app routing and frontend work.
+
+It uses RunPod GPUs and the fal.ai API to run SAM3 computer vision models.
+
+It uses Three.js for 3D rendering, SerpAPI for image search, and Gemini Nano Banana Pro 2 for image generation.
+
 ## Screenshots
 
 ![InteriorAI screenshot 1](public/readme/1.jpg)
@@ -20,11 +28,3 @@ With Furniture Finder mode, you can quickly identify any piece of furniture you 
 ![InteriorAI screenshot 4](public/readme/4.jpg)
 ![InteriorAI screenshot 5](public/readme/5.jpg)
 ![InteriorAI screenshot 6](public/readme/6.jpg)
-
-## Tech Stack
-
-The app uses Next.js, TypeScript, and React for app routing and frontend work.
-
-It uses RunPod GPUs and the fal.ai API to run SAM3 computer vision models.
-
-It uses Three.js for 3D rendering, SerpAPI for image search, and Gemini Nano Banana Pro 2 for image generation.
