@@ -22,6 +22,27 @@ interface SAM3DOutput {
     individual_glbs?: SAM3DFile[]
 }
 
+function normalize3DError(message: string): string {
+    const normalized = message.toLowerCase()
+
+    if (
+        normalized.includes('the string did not match the expected pattern') ||
+        normalized.includes('unable to process input image') ||
+        normalized.includes('fetch failed')
+    ) {
+        return '3D generation failed for this image. Please try another furniture photo or retry.'
+    }
+
+    if (
+        normalized.includes('unregistered callers') ||
+        normalized.includes('api key')
+    ) {
+        return '3D generation is unavailable right now. Please check server API key configuration.'
+    }
+
+    return message
+}
+
 function dataURLtoFile(dataurl: string, filename: string): File {
     const arr = dataurl.split(',')
     const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png'
@@ -122,8 +143,9 @@ export async function POST(request: NextRequest) {
         if (error && typeof error === 'object' && 'body' in error) {
             console.error('Error body:', JSON.stringify((error as { body: unknown }).body, null, 2))
         }
+        const message = error instanceof Error ? error.message : '3D generation failed'
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : '3D generation failed' },
+            { error: normalize3DError(message) },
             { status: 500 }
         )
     }

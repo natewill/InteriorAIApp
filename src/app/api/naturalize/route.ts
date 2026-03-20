@@ -138,11 +138,25 @@ function isValidImageUrl(value: string): boolean {
     return value.startsWith('data:image/') || value.startsWith('https://');
 }
 
-function shouldFallback(message: string): boolean {
-    return (
-        message.includes('The string did not match the expected pattern') ||
-        message.includes('Unable to process input image')
-    );
+function normalizeNaturalizeError(message: string): string {
+    const normalized = message.toLowerCase()
+
+    if (
+        normalized.includes('the string did not match the expected pattern') ||
+        normalized.includes('unable to process input image') ||
+        normalized.includes('fetch failed')
+    ) {
+        return 'Image generation failed for this scene. Please adjust placement or retry.'
+    }
+
+    if (
+        normalized.includes('unregistered callers') ||
+        normalized.includes('api key')
+    ) {
+        return 'Image generation is unavailable right now. Please check server API key configuration.'
+    }
+
+    return message
 }
 
 function createModel(modelName: string) {
@@ -258,7 +272,7 @@ export async function POST(request: NextRequest) {
                 const message = error instanceof Error ? error.message : String(error)
                 console.error('Naturalize fallback failed:', message)
 
-                if (!shouldFallback(message)) {
+                if (normalizeNaturalizeError(message) === message) {
                     throw error
                 }
             }
@@ -277,9 +291,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error('Naturalization error:', message)
-        const safeMessage = shouldFallback(message)
-            ? 'Image generation failed for this scene. Please adjust placement or retry.'
-            : message
+        const safeMessage = normalizeNaturalizeError(message)
 
         return NextResponse.json(
             { error: safeMessage || 'Naturalization failed' },

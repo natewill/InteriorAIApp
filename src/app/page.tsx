@@ -380,7 +380,9 @@ export default function Home() {
         />
       )}
 
-      <OnboardingTour />
+      {!results && !showPlacement && !placementPending && (
+        <OnboardingTour />
+      )}
     </div>
   );
 }

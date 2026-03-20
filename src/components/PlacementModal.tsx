@@ -50,6 +50,27 @@ function isValidImageUrl(value: string): boolean {
     return value.startsWith('data:image/') || value.startsWith('https://');
 }
 
+function normalizeGenerateError(message: string): string {
+    const normalized = message.toLowerCase();
+
+    if (
+        normalized.includes('the string did not match the expected pattern') ||
+        normalized.includes('unable to process input image') ||
+        normalized.includes('fetch failed')
+    ) {
+        return 'Image generation failed for this scene. Please adjust placement or retry.';
+    }
+
+    if (
+        normalized.includes('unregistered callers') ||
+        normalized.includes('api key')
+    ) {
+        return 'Image generation is unavailable right now. Please check server API key configuration.';
+    }
+
+    return message;
+}
+
 export default function PlacementModal({
     roomImageUrl,
     depthImageUrl,
@@ -148,7 +169,7 @@ export default function PlacementModal({
             const data = await res.json() as { error?: string; images?: Array<{ url?: string }> };
 
             if (!res.ok) {
-                throw new Error(data.error || `Server error ${res.status}`);
+                throw new Error(normalizeGenerateError(data.error || `Server error ${res.status}`));
             }
 
             if (!data.images || data.images.length === 0) {
@@ -166,7 +187,8 @@ export default function PlacementModal({
             onConfirm(resultUrls);
         } catch (err) {
             console.error('Generation failed:', err);
-            setGenerateError(err instanceof Error ? err.message : 'Generation failed');
+            const message = err instanceof Error ? err.message : 'Generation failed';
+            setGenerateError(normalizeGenerateError(message));
         } finally {
             setGenerating(false);
         }
